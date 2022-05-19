@@ -1,32 +1,50 @@
 
+import pathlib
 import gzip
+
 import pandas as pd
-from astropy.io import ascii
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 import numpy as np
 from uncertainties import ufloat
 from uncertainties import unumpy as unp
-# import numpy as np
 import matplotlib.pyplot as plt
 
 
 # Path to the database
 db_path = '/media/gabriel/USB1TB/GaiaEDR3/datafiles/'
 
+# File that contains the regions delimited by each frame
+txt_f = 'frame_ranges.txt'
+
+# TODO: test if it matches Vizier at high DE
+
 
 def main():
     """
     """
-
     frame = 'galactic'  # 'equatorial'
+    print("Using {frame} frame")
 
     cl_name = "NGC752"
     # Cluster coordinates: center and box size
     cx, cy = 136.9587510, -23.2884
-    # In arcmin
-    box_s = 10
+    # Size of box to query (in arcmin)
+    box_s = 360
 
+    all_frames = query(frame, cl_name, cx, cy, box_s)
+
+    all_frames = xyCoords(all_frames)
+    all_frames = uncertMags(all_frames)
+    all_frames = all_frames.drop(columns=[
+        'FG', 'e_FG', 'FBP', 'e_FBP', 'FRP', 'e_FRP'])
+    all_frames.to_csv('./out/' + cl_name + '.csv', index=False)
+
+
+def query(frame, cl_name, cx, cy, box_s):
+    """
+    """
+    print(f"Querying cluster: {cl_name}...")
     # To degrees
     box_s /= 60.
 
@@ -39,10 +57,8 @@ def main():
     xmin_cl, xmax_cl = cx - box_s_x * .5, cx + box_s_x * .5
     ymin_cl, ymax_cl = cy - box_s * .5, cy + box_s * .5
 
-    # TODO: test if it matches Vizier at high DE
-
-    txt_f = 'frame_ranges.txt'
-    fdata = ascii.read(txt_f)
+    # Read data about the regions occupied by each frame
+    fdata = pd.read_csv(txt_f)
 
     # These are the points that determine the range of *all* the frames
     ra_min, ra_max = fdata['ra_min'], fdata['ra_max']
@@ -71,24 +87,25 @@ def main():
     # Frames that overlap with cluster's region
     frame_intersec = p1_in | p2_in | p3_in | p4_in
 
-    plt.scatter(xmin_cl, ymin_cl, c='k')
-    plt.scatter(xmin_cl, ymax_cl, c='k')
-    plt.scatter(xmax_cl, ymin_cl, c='k')
-    plt.scatter(xmax_cl, ymax_cl, c='k')
-    cols, mrks = ('r', 'g', 'b', 'cyan', 'orange'), ('s', 'x', 'v', '^', 'D')
-    j = 0
-    for i, flag in enumerate(frame_intersec):
-        if flag:
-            plt.scatter(xmin_fr[i], ymin_fr[i], c=cols[j], marker=mrks[j])
-            plt.scatter(xmin_fr[i], ymax_fr[i], c=cols[j], marker=mrks[j])
-            plt.scatter(xmax_fr[i], ymax_fr[i], c=cols[j], marker=mrks[j])
-            plt.scatter(xmax_fr[i], ymin_fr[i], c=cols[j], marker=mrks[j])
-            j += 1
-        if j == 4:
-            break
-    plt.show()
+    # plt.scatter(xmin_cl, ymin_cl, c='k')
+    # plt.scatter(xmin_cl, ymax_cl, c='k')
+    # plt.scatter(xmax_cl, ymin_cl, c='k')
+    # plt.scatter(xmax_cl, ymax_cl, c='k')
+    # cols, mrks = ('r', 'g', 'b', 'cyan', 'orange'), ('s', 'x', 'v', '^', 'D')
+    # j = 0
+    # for i, flag in enumerate(frame_intersec):
+    #     if flag:
+    #         plt.scatter(xmin_fr[i], ymin_fr[i], c=cols[j], marker=mrks[j])
+    #         plt.scatter(xmin_fr[i], ymax_fr[i], c=cols[j], marker=mrks[j])
+    #         plt.scatter(xmax_fr[i], ymax_fr[i], c=cols[j], marker=mrks[j])
+    #         plt.scatter(xmax_fr[i], ymin_fr[i], c=cols[j], marker=mrks[j])
+    #         j += 1
+    #     if j == 4:
+    #         break
+    # plt.show()
 
     data_in_files = list(fdata[frame_intersec]['filename'])
+    print(f"Cluster is present in {len(data_in_files)} frames")
 
     all_frames = []
     for i, file in enumerate(data_in_files):
@@ -106,44 +123,39 @@ def main():
             my = (data_y >= ymin_cl) & (data_y <= ymax_cl)
             mxy = (mx & my)
             frame_i = data[mxy]
-            print(file, len(frame_i))
+            print(f"Frame {file} contains {len(frame_i)} stars"
+                  + " from the cluster region")
 
-            frame_x, frame_y = frame_i['ra'].values, frame_i['dec'].values
-            if frame == 'galactic':
-                frame_x, frame_y = frame_i['lon'].values, frame_i['lat'].values
-
-            if mxy.sum():
-                if len(frame_i) > 500:
-                    idxs = np.random.choice(len(frame_i), 500, replace=False)
-                    plt.scatter(frame_x[idxs], frame_y[idxs], alpha=.5,
-                                marker='x')
-                else:
-                    plt.scatter(frame_x, frame_y, alpha=.5, marker='x')
+            # frame_x, frame_y = frame_i['ra'].values, frame_i['dec'].values
+            # if frame == 'galactic':
+            #     frame_x, frame_y = frame_i['lon'].values, frame_i['lat'].values
+            # if mxy.sum():
+            #     if len(frame_i) > 500:
+            #         idxs = np.random.choice(len(frame_i), 500, replace=False)
+            #         plt.scatter(frame_x[idxs], frame_y[idxs], alpha=.5,
+            #                     marker='x')
+            #     else:
+            #         plt.scatter(frame_x, frame_y, alpha=.5, marker='x')
 
             all_frames.append(frame_i)
-    plt.show()
-    breakpoint()
+    # plt.show()
 
     all_frames = pd.concat(all_frames)
 
     all_frames = all_frames.rename(columns={
         'designation': 'EDR3Name', 'ra': 'RA_ICRS', 'dec': 'DE_ICRS',
         'parallax': 'Plx', 'parallax_error': 'e_Plx',
-        'pmra': 'pmRA', 'pmra_error': 'e_pmRA',
-        'pmdec': 'pmDE', 'pmdec_error': 'e_pmDE',
+        'pmra': 'pmRA', 'pmra_error': 'e_pmRA', 'lat': 'GLAT',
+        'pmdec': 'pmDE', 'pmdec_error': 'e_pmDE', 'lon': 'GLON',
         'phot_g_mean_flux': 'FG', 'phot_g_mean_flux_error': 'e_FG',
         'phot_bp_mean_flux': 'FBP', 'phot_bp_mean_flux_error': 'e_FBP',
         'phot_rp_mean_flux': 'FRP', 'phot_rp_mean_flux_error': 'e_FRP',
         'dr2_radial_velocity': 'RVDR2', 'dr2_radial_velocity_error': 'e_RVDR2'}
     )
 
-    print(len(all_frames))
+    print(f"Writing {len(all_frames)} stars to file")
 
-    all_frames = xyCoords(all_frames)
-    all_frames = uncertMags(all_frames)
-    all_frames = all_frames.drop(columns=[
-        'FG', 'e_FG', 'FBP', 'e_FBP', 'FRP', 'e_FRP'])
-    all_frames.to_csv('./out/' + cl_name + '.csv', index=False)
+    return all_frames
 
 
 def xyCoords(data):
@@ -203,4 +215,7 @@ def uncertMags(data):
 
 
 if __name__ == '__main__':
+    # Create output dir if it does not exist
+    path = pathlib.Path('./out')
+    path.mkdir(parents=True, exist_ok=True)
     main()
