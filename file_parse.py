@@ -4,6 +4,7 @@ import gzip
 
 import pandas as pd
 import astropy.units as u
+# from astropy.coordinates import Angle
 from astropy.coordinates import SkyCoord
 import numpy as np
 # from uncertainties import ufloat
@@ -21,10 +22,10 @@ input_f = "clusters.ini"
 txt_f = 'frame_ranges.txt'
 
 max_mag = 19
-# frame = 'equatorial'
+#frame = 'equatorial'
 frame = 'galactic'
 
-max_box = 3.
+max_box = 1
 
 # TODO: test if it matches Vizier at high DE
 
@@ -78,13 +79,15 @@ def main():
 
         # Cluster coordinates: center and box size
         c_ra, c_dec = cluster['ra'], cluster['dec']
-        # c_lon, c_lat = cluster['GLON'], cluster['GLAT']
         # Size of box to query (in degrees)
         box_s_eq = cluster['box']
 
         data_in_files, xmin_cl, xmax_cl, ymin_cl, ymax_cl = findFrames(
             frame, max_box, c_ra, c_dec, box_s_eq, fdata, xmin_fr,
             ymin_fr, xmax_fr, ymax_fr)
+
+        if len(data_in_files) == 0:
+            continue
 
         all_frames = query(
             frame, data_in_files, xmin_cl, xmax_cl, ymin_cl, ymax_cl)
@@ -116,6 +119,7 @@ def findFrames(
     """
     """
     box_s_eq = min(max_box, box_s_eq)
+    print(f"Box size: {box_s_eq} deg")
 
     # Correct size in RA
     box_s_x = box_s_eq / np.cos(np.deg2rad(c_dec))
@@ -140,17 +144,36 @@ def findFrames(
         ymin_cl = np.min(np.array([p1[1], p2[1], p3[1], p4[1]]), 0)
         ymax_cl = np.max(np.array([p1[1], p2[1], p3[1], p4[1]]), 0)
 
+        # if (xmax_cl - xmin_cl) > 300:
+        #     print("Frame crosses longitude boundaries")
+        #     return np.array([]), 0, 0, 0, 0
+
+    # print(xmin_cl, xmax_cl, ymin_cl, ymax_cl)
+    # if xmax_cl - xmin_cl > xl:
+    #     print("Wrapping right ascension / longitude")
+    #     aa = Angle([xmin_cl, xmax_cl] * u.deg)
+    #     xmax_cl, xmin_cl = aa.wrap_at(180 * u.deg).degree
+    #     #
+    # print(xmin_cl, xmax_cl, ymin_cl, ymax_cl)
+
     # Identify which frames contain the cluster region
-    p1_in = (xmin_fr <= xmin_cl) & (xmax_fr >= xmin_cl) &\
-        (ymin_fr <= ymin_cl) & (ymax_fr >= ymin_cl)
-    p2_in = (xmin_fr <= xmin_cl) & (xmax_fr >= xmin_cl) &\
-        (ymin_fr <= ymax_cl) & (ymax_fr >= ymax_cl)
-    p3_in = (xmin_fr <= xmax_cl) & (xmax_fr >= xmax_cl) &\
-        (ymin_fr <= ymin_cl) & (ymax_fr >= ymin_cl)
-    p4_in = (xmin_fr <= xmax_cl) & (xmax_fr >= xmax_cl) &\
-        (ymin_fr <= ymax_cl) & (ymax_fr >= ymax_cl)
-    # Frames that overlap with cluster's region
-    frame_intersec = p1_in | p2_in | p3_in | p4_in
+    l2 = (xmin_cl, ymax_cl)
+    r2 = (xmax_cl, ymin_cl)
+    frame_intersec = []
+    for i, xmin_fr_i in enumerate(xmin_fr):
+
+        # bb = Angle([xmin_fr_i, xmax_fr[i]] * u.deg)
+        # xmin_fr_i, xmax_fr_i = bb.wrap_at(180 * u.deg).degree
+
+        # Top left
+        l1 = (xmin_fr_i, ymax_fr[i])
+        # Bottom right
+        r1 = (xmax_fr[i], ymin_fr[i])
+        frame_intersec.append(doOverlap(l1, r1, l2, r2))
+        # if doOverlap(l1, r1, l2, r2):
+        #     print(xmin_fr_i, xmax_fr_i, ymin_fr[i], ymax_fr[i])
+
+    frame_intersec = np.array(frame_intersec)
 
     data_in_files = list(fdata[frame_intersec]['filename'])
     print(f"Cluster is present in {len(data_in_files)} frames")
@@ -173,6 +196,31 @@ def findFrames(
     return data_in_files, xmin_cl, xmax_cl, ymin_cl, ymax_cl
 
 
+def doOverlap(l1, r1, l2, r2):
+    """
+    Given two rectangles, find if the given two rectangles overlap or not.
+    Note that a rectangle can be represented by two coordinates, top left and
+    bottom right.
+    l1: Top Left coordinate of first rectangle.
+    r1: Bottom Right coordinate of first rectangle.
+    l2: Top Left coordinate of second rectangle.
+    r2: Bottom Right coordinate of second rectangle.
+
+    Source: https://www.geeksforgeeks.org/find-two-rectangles-overlap/
+    """
+    min_x1, max_y1 = l1
+    max_x1, min_y1 = r1
+    min_x2, max_y2 = l2
+    max_x2, min_y2 = r2
+    # If one rectangle is on left side of other
+    if (min_x1 > max_x2 or min_x2 > max_x1):
+        return False
+    # If one rectangle is above other
+    if(min_y1 > max_y2 or min_y2 > max_y1):
+        return False
+    return True
+
+
 def query(frame, data_in_files, xmin_cl, xmax_cl, ymin_cl, ymax_cl):
     """
     """
@@ -186,13 +234,17 @@ def query(frame, data_in_files, xmin_cl, xmax_cl, ymin_cl, ymax_cl):
                 data_x, data_y = radec2lonlat(data_x.values, data_y.values)
                 data['lon'], data['lat'] = data_x, data_y
 
+            #     data_xx = Angle(data_x * u.deg).wrap_at(180 * u.deg).degree
+            # print(data_xx.min(), data_xx.max())
+
             mx = (data_x >= xmin_cl) & (data_x <= xmax_cl)
             my = (data_y >= ymin_cl) & (data_y <= ymax_cl)
             msk = (mx & my)
+
+            print(f"{i+1}, {file} contains {msk.sum()} cluster stars")
             if msk.sum() == 0:
                 continue
 
-            print(f"Frame {file} contains {msk.sum()} cluster stars")
             frame_i = data[msk]
 
             # frame_x, frame_y = frame_i['ra'].values, frame_i['dec'].values
